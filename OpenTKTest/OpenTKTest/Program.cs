@@ -2,7 +2,18 @@
 using System.Runtime.InteropServices;
 using OpenTK.Compute.OpenCL;
 
-VectorSumOpenCL();
+try
+{
+    VectorSumOpenCL();
+    Console.ReadKey();
+}
+catch (Exception ex)
+{
+    Console.WriteLine(ex.Message);
+}
+
+static bool CompareVendor(byte[] paramValue, string vendorName) =>
+    Encoding.UTF8.GetString(paramValue).Contains(vendorName, StringComparison.InvariantCultureIgnoreCase);
 
 //Reads the given file
 static string ReadProgramFile(string fileName)
@@ -15,7 +26,7 @@ static string ReadProgramFile(string fileName)
 }
 
 //Throws an exception with the given parameters, if result is not equals CLResultCode.Success
-static void ThrowError(CLResultCode result, string name, string error = "Is not Successful!")
+static void ThrowError(CLResultCode result, string name, string error = "")
 {
     if (result == CLResultCode.Success)
         return;
@@ -23,7 +34,7 @@ static void ThrowError(CLResultCode result, string name, string error = "Is not 
     throw new Exception($"{name}: {result} \n error: {error}");
 }
 
-//https://www.youtube.com/watch?v=Iz6feoh9We8 implementation is C#
+//https://www.youtube.com/watch?v=Iz6feoh9We8 implemented in C#
 static void VectorSumOpenCL()
 {
     //Get Platform
@@ -39,26 +50,27 @@ static void VectorSumOpenCL()
     {
         CLDevice[] devices = new CLDevice[numberOfEntries];
         CLResultCode deviceResult = CL.GetDeviceIds(platform[i], DeviceType.Gpu, numberOfEntries, devices, out uint deviceCount);
-        if (deviceResult == CLResultCode.Success)
+        ThrowError(deviceResult, nameof(deviceResult));
+
+        for (int j = 0; j < deviceCount; j++)
         {
-            for (int j = 0; j < deviceCount; j++)
+            CLResultCode deviceInfoResult = CL.GetDeviceInfo(devices[j], DeviceInfo.Vendor, out byte[] paramValue);
+            ThrowError(deviceInfoResult, nameof(deviceInfoResult));
+
+            if (CompareVendor(paramValue, "Intel"))
             {
-                CLResultCode deviceInfoResult = CL.GetDeviceInfo(devices[j], DeviceInfo.Vendor, out byte[] paramValue);
-                //if (deviceInfoResult != CLResultCode.Success && Encoding.UTF8.GetString(paramValue).Contains("Intel"))
-                //{
-                //    device = devices[j];
-                //    break;
-                //}
-                //if (deviceInfoResult != CLResultCode.Success && Encoding.UTF8.GetString(paramValue).Contains("AMD"))
-                //{
-                //    device = devices[j];
-                //    break;
-                //}
-                if (deviceInfoResult == CLResultCode.Success && Encoding.UTF8.GetString(paramValue).Contains("NVIDIA"))
-                {
-                    device = devices[j];
-                    break;
-                }
+                device = devices[j];
+                break;
+            }
+            else if (CompareVendor(paramValue, "AMD"))
+            {
+                device = devices[j];
+                break;
+            }
+            else if (CompareVendor(paramValue, "NVIDIA"))
+            {
+                device = devices[j];
+                break;
             }
         }
     }
@@ -109,22 +121,24 @@ static void VectorSumOpenCL()
 
     //Vec EnqueueWriteBuffer params
     bool blockingWrite = true;
-    UIntPtr offset = new(0);
-    //IntPtr hostPtr = new(0);
+    UIntPtr offset = UIntPtr.Zero;
+    IntPtr hostPtr = IntPtr.Zero;
 
     //Veca buffer
     UIntPtr vecaSize = new(vecArrayLenght * sizeof(float));
-    CLBuffer veca = CL.CreateBuffer(context, MemoryFlags.ReadOnly, vecaSize, (IntPtr)null /*hostPtr*/, out CLResultCode vecaBufferResult);
+    CLBuffer veca = CL.CreateBuffer(context, MemoryFlags.ReadOnly, vecaSize, hostPtr, out CLResultCode vecaBufferResult);
     ThrowError(vecaBufferResult, nameof(vecaBufferResult));
 
     //Vecb buffer
     UIntPtr vecbSize = new(vecArrayLenght * sizeof(float));
-    CLBuffer vecb = CL.CreateBuffer(context, MemoryFlags.ReadOnly, vecbSize, (IntPtr)null /*hostPtr*/, out CLResultCode vecbBufferResult);
+    CLBuffer vecb = CL.CreateBuffer(context, MemoryFlags.ReadOnly, vecbSize, hostPtr, out CLResultCode vecbBufferResult);
     ThrowError(vecbBufferResult, nameof(vecbBufferResult));
 
+    //Create the data arrays
     float[] vecaData = new float[vecArrayLenght];
     float[] vecbData = new float[vecArrayLenght];
 
+    //Fill up the data arrays
     for (int i = 0; i < vecArrayLenght; i++)
     {
         vecaData[i] = i * i;
@@ -148,29 +162,21 @@ static void VectorSumOpenCL()
     ThrowError(enqueueVecbResult, nameof(enqueueVecbResult));
 
     //Vecc buffer
-    IntPtr veccDataPtr = IntPtr.Zero;
     UIntPtr veccSize = new(vecArrayLenght * sizeof(float));
-    CLBuffer vecc = CL.CreateBuffer(context, MemoryFlags.ReadOnly, veccSize, (IntPtr)null /*hostPtr*/, out CLResultCode veccBufferResult);
+    IntPtr veccDataPtr = Marshal.AllocHGlobal((int)veccSize);
+    CLBuffer vecc = CL.CreateBuffer(context, MemoryFlags.ReadOnly, veccSize, hostPtr, out CLResultCode veccBufferResult);
     ThrowError(veccBufferResult, nameof(veccBufferResult));
 
     //Set vec kernel params
-    unsafe
-    {
-        UIntPtr vecaBufferSize = new((uint)sizeof(CLBuffer));
-        CLResultCode kernelResult1 = CL.SetKernelArg(kernel, 0, vecaBufferSize, veca);
-        ThrowError(kernelResult1, nameof(kernelResult1));
-
-        UIntPtr vecbBufferSize = new((uint)sizeof(CLBuffer));
-        CLResultCode kernelResult2 = CL.SetKernelArg(kernel, 0, vecbBufferSize, vecb);
-        ThrowError(kernelResult2, nameof(kernelResult2));
-
-        UIntPtr veccBufferSize = new((uint)sizeof(CLBuffer));
-        CLResultCode kernelResult3 = CL.SetKernelArg(kernel, 0, veccBufferSize, vecc);
-        ThrowError(kernelResult3, nameof(kernelResult3));
-    }
+    CLResultCode kernelResult1 = CL.SetKernelArg(kernel, 0, veca);
+    ThrowError(kernelResult1, nameof(kernelResult1));
+    CLResultCode kernelResult2 = CL.SetKernelArg(kernel, 1, vecb);
+    ThrowError(kernelResult2, nameof(kernelResult2));
+    CLResultCode kernelResult3 = CL.SetKernelArg(kernel, 2, vecc);
+    ThrowError(kernelResult3, nameof(kernelResult3));
 
     //Setup kernel queue
-    uint workDimension = 0;
+    uint workDimension = 1;
     UIntPtr[] globalWorkOffset = new UIntPtr[1];
     globalWorkOffset[0] = new UIntPtr(0);
     UIntPtr[] globalWorkSize = new UIntPtr[1];
@@ -184,12 +190,12 @@ static void VectorSumOpenCL()
     CLResultCode enqueueReadBuffer = CL.EnqueueReadBuffer(queue, vecc, blockingWrite, offset, veccSize, veccDataPtr, numberOfEventsInWaitList, null /*eventWaitList*/, out _);
     ThrowError(enqueueReadBuffer, nameof(enqueueReadBuffer));
 
-    //get c# array from veccDataPtr
-    float[] veccData = new float[vecArrayLenght];
-    Marshal.Copy(veccDataPtr, veccData, 0, (int)veccSize.ToUInt32());
-
     //Pass queued up commands to device
     CL.Finish(queue);
+
+    //get c# array from veccDataPtr
+    float[] veccData = new float[vecArrayLenght];
+    Marshal.Copy(veccDataPtr, veccData, 0, (int)vecArrayLenght);
 
     //write result to console
     Console.WriteLine($"Result: ");
@@ -216,19 +222,25 @@ static void VectorSumOpenCL()
     Marshal.FreeHGlobal(commandProperties);
     Marshal.FreeHGlobal(buildNotificationCallback);
     Marshal.FreeHGlobal(buildUserData);
-    //Marshal.FreeHGlobal(offset);
-    //Marshal.FreeHGlobal(hostPtr);
-    //Marshal.FreeHGlobal(vecaSize);
-    //Marshal.FreeHGlobal(vecbSize);
+    unsafe
+    {
+        Marshal.FreeHGlobal((IntPtr)offset.ToPointer());
+    }
+    Marshal.FreeHGlobal(hostPtr);
+    unsafe
+    {
+        Marshal.FreeHGlobal((IntPtr)vecaSize.ToPointer());
+        Marshal.FreeHGlobal((IntPtr)vecbSize.ToPointer());
+    }
     Marshal.FreeHGlobal(vecaDataPtr);
     Marshal.FreeHGlobal(vecbDataPtr);
     Marshal.FreeHGlobal(veccDataPtr);
-    //Marshal.FreeHGlobal(veccSize);
-    //Marshal.FreeHGlobal(vecaBufferSize);
-    //Marshal.FreeHGlobal(vecbBufferSize);
-    //Marshal.FreeHGlobal(veccBufferSize);
-    //Marshal.FreeHGlobal(globalWorkOffset);
-    //Marshal.FreeHGlobal(globalWorkSize);
-    //Marshal.FreeHGlobal(localWorkSize);
+    unsafe
+    {
+        Marshal.FreeHGlobal((IntPtr)veccSize.ToPointer());
+        Marshal.FreeHGlobal((IntPtr)globalWorkOffset[0].ToPointer());
+        Marshal.FreeHGlobal((IntPtr)globalWorkSize[0].ToPointer());
+        Marshal.FreeHGlobal((IntPtr)localWorkSize[0].ToPointer());
+    }
     GC.Collect();
 }
