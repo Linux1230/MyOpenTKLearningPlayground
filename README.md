@@ -1,7 +1,5 @@
 # OpenTKOpenCLTest
 
-This is my first try!
-
 Copy ```OpenTKOpenCLTest\OpenTKTest\OpenTKTest\vecsum.cl``` to ```OpenTKOpenCLTest\OpenTKTest\OpenTKTest\bin\Debug\net6.0\```
 
 C# implementation based on:
