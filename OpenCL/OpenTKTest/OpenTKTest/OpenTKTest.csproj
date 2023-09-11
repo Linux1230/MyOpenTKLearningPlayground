@@ -12,4 +12,10 @@
     <PackageReference Include="OpenTK" Version="4.7.4" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Update="vecsum.cl">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
 </Project>
